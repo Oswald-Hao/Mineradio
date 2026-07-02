@@ -70,10 +70,48 @@ Windows 用户可以在 GitHub Releases 中下载安装包。
 ```bash
 npm install
 npm start
-npm run build:win
+npm run build:win    # Windows NSIS 安装包
+npm run build:linux  # Linux AppImage / deb / tar.gz
 ```
 
-桌面版入口由 Electron 主进程加载本地服务。`npm run build:win` 会生成 Windows NSIS 安装包，产物位于 `dist/`。
+桌面版入口由 Electron 主进程加载本地服务。`npm run build:win` 会生成 Windows NSIS 安装包，`npm run build:linux` 会生成 Linux AppImage、deb 和 tar.gz 包，产物均位于 `dist/`。
+
+### Linux 使用说明
+
+Linux 用户可以通过源码直接运行，也可以使用打包产物。
+
+**开发运行：**
+
+```bash
+git clone https://github.com/Oswald-Hao/Mineradio.git
+cd Mineradio
+git checkout linux-support
+npm install
+npm start
+```
+
+**打包安装：**
+
+```bash
+npm run build:linux
+```
+
+产物位于 `dist/` 目录：
+- `Mineradio-x.y.z.AppImage` — 赋予执行权限后直接运行
+- `Mineradio-x.y.z.deb` — Debian/Ubuntu 系安装包
+- `Mineradio-x.y.z.tar.gz` — 便携解压版
+
+```bash
+# AppImage 使用方式
+chmod +x dist/Mineradio-*.AppImage
+./dist/Mineradio-*.AppImage
+```
+
+首次启动后会自动在 `~/.local/share/applications/` 创建桌面快捷方式。
+
+**已知差异：**
+- 桌面歌词中键穿透切换暂仅 Windows 可用（依赖 PowerShell 全局鼠标检测）
+- 壁纸窗口在 Linux 上以全屏无边框模式运行，不嵌入桌面壁纸层
 
 ## 更新机制
 
