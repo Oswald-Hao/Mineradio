@@ -48,8 +48,12 @@ const CHROMIUM_PERFORMANCE_SWITCHES = [
   ['disable-renderer-backgrounding'],
   ['disable-backgrounding-occluded-windows'],
   ['force_high_performance_gpu'],
-  ['use-angle', 'd3d11'],
 ];
+if (process.platform === 'win32') {
+  CHROMIUM_PERFORMANCE_SWITCHES.push(['use-angle', 'd3d11']);
+} else if (process.platform === 'linux') {
+  CHROMIUM_PERFORMANCE_SWITCHES.push(['use-angle', 'gl']);
+}
 for (const [name, value] of CHROMIUM_PERFORMANCE_SWITCHES) {
   if (value == null) app.commandLine.appendSwitch(name);
   else app.commandLine.appendSwitch(name, value);
@@ -273,13 +277,18 @@ function getUpdateDownloadDir() {
 }
 
 function shouldEnsureDesktopShortcut() {
-  if (process.platform !== 'win32') return false;
+  if (process.platform !== 'win32' && process.platform !== 'linux') return false;
   if (process.env.MINERADIO_NO_DESKTOP_SHORTCUT === '1') return false;
   return app.isPackaged || process.env.MINERADIO_CREATE_DESKTOP_SHORTCUT === '1';
 }
 
 function ensureDesktopShortcut() {
   if (!shouldEnsureDesktopShortcut()) return { ok: false, skipped: true };
+  if (process.platform === 'linux') return ensureLinuxDesktopShortcut();
+  return ensureWindowsDesktopShortcut();
+}
+
+function ensureWindowsDesktopShortcut() {
   try {
     const shortcutPath = path.join(app.getPath('desktop'), `${APP_NAME}.lnk`);
     const target = process.execPath;
@@ -307,6 +316,39 @@ function ensureDesktopShortcut() {
     return { ok: true, path: shortcutPath, created: true };
   } catch (e) {
     console.warn('Desktop shortcut creation skipped:', e.message);
+    return { ok: false, error: e.message || 'DESKTOP_SHORTCUT_FAILED' };
+  }
+}
+
+function ensureLinuxDesktopShortcut() {
+  try {
+    const desktopDir = path.join(require('os').homedir(), '.local', 'share', 'applications');
+    const desktopPath = path.join(desktopDir, 'mineradio.desktop');
+    const target = process.execPath;
+    const iconPath = path.join(__dirname, '..', 'build', 'icon.png');
+    const desktopEntry = [
+      '[Desktop Entry]',
+      'Type=Application',
+      'Name=Mineradio',
+      'Comment=Mineradio desktop music player',
+      `Exec="${target}"`,
+      `Icon=${fs.existsSync(iconPath) ? iconPath : 'audio-player'}`,
+      'Categories=AudioVideo;Audio;Player;',
+      'StartupNotify=false',
+      'Terminal=false',
+    ].join('\n') + '\n';
+
+    fs.mkdirSync(desktopDir, { recursive: true });
+    if (fs.existsSync(desktopPath)) {
+      const existing = fs.readFileSync(desktopPath, 'utf8');
+      if (existing.includes(`Exec="${target}"`)) {
+        return { ok: true, path: desktopPath, existing: true };
+      }
+    }
+    fs.writeFileSync(desktopPath, desktopEntry, { mode: 0o644 });
+    return { ok: true, path: desktopPath, created: true };
+  } catch (e) {
+    console.warn('Linux desktop shortcut creation skipped:', e.message);
     return { ok: false, error: e.message || 'DESKTOP_SHORTCUT_FAILED' };
   }
 }
