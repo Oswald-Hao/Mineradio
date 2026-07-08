@@ -57,11 +57,14 @@ const { analyzePodcastDjStream, analyzePodcastDjIntro } = require('./dj-analyzer
 
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
-// 清除代理，直连网易云 CDN
-delete process.env.HTTP_PROXY;
-delete process.env.HTTPS_PROXY;
-delete process.env.http_proxy;
-delete process.env.https_proxy;
+// 绕过代理直连网易云 CDN
+(function ensureNoProxyForNeteaseCDN() {
+  const extra = 'music.126.net,*.music.126.net,music.163.com,*.music.163.com';
+  ['NO_PROXY', 'no_proxy'].forEach(function(key) {
+    var current = process.env[key] || '';
+    process.env[key] = current ? current + ',' + extra : extra;
+  });
+})();
 function platformUA() {
   switch (process.platform) {
     case 'win32': return 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
