@@ -49,6 +49,58 @@ const https = require('https');
 const fs   = require('fs');
 const path = require('path');
 const os = require('os');
+const dns = require('dns');
+
+// Node.js 的 fetch() 底层用 dns.lookup() 解析域名。
+// 如果系统 systemd-resolved stub (127.0.0.53) 卡住，会导致所有 fetch 超时。
+// 这里用自定义 Resolver 直连上游 DNS，绕过 systemd-resolved。
+(function patchDnsLookupForResolved() {
+  const { Resolver } = require('dns');
+  const resolver = new Resolver();
+  resolver.setServers(['223.5.5.5', '119.29.29.29']);
+  const origLookup = dns.lookup;
+
+  // 创建自定义 lookup 函数供 https.Agent 使用
+  function customLookup(hostname, opts, callback) {
+    if (typeof opts === 'function') { callback = opts; opts = {}; }
+    const family = (opts && opts.family) || 0;
+    if (family === 0 || family === 4) {
+      return resolver.resolve4(hostname, (err, addrs) => {
+        if (!err && addrs && addrs.length) return callback(null, addrs[0], 4);
+        if (family === 4) return callback(err || new Error('DNS lookup failed: ' + hostname));
+        return origLookup(hostname, opts, callback);
+      });
+    }
+    return origLookup(hostname, opts, callback);
+  }
+
+  module.exports._mineradioCustomLookup = customLookup;
+
+  // monkey-patch dns.lookup for 其他使用 dns.lookup 的模块
+  dns.lookup = function lookupOverride(hostname, options, callback) {
+    return customLookup(hostname, options, callback);
+  };
+})();
+
+// 封装 fetch: 绕过系统 DNS 直连，避免 systemd-resolved 卡住
+function fetchBypassResolved(url, opts) {
+  const cl = module.exports._mineradioCustomLookup;
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const isHttps = u.protocol === 'https:';
+    const mod = isHttps ? require('https') : require('http');
+    const agent = new mod.Agent({ lookup: cl, keepAlive: true });
+    const req = mod.request(u, {
+      method: (opts && opts.method) || 'GET',
+      headers: (opts && opts.headers) || {},
+      agent,
+      timeout: 30000,
+    }, (resp) => { resolve(resp); });
+    req.on('timeout', () => { req.destroy(); reject(new Error('Request timeout')); });
+    req.on('error', reject);
+    req.end();
+  });
+}
 const crypto = require('crypto');
 const tls = require('tls');
 const { once } = require('events');
@@ -4161,9 +4213,9 @@ const server = http.createServer(async (req, res) => {
         res.end('Invalid cover url');
         return;
       }
-      const resp = await fetch(coverUrl, { headers: { 'User-Agent': UA, 'Referer': 'https://music.163.com/' } });
-      const ct  = resp.headers.get('content-type') || 'image/jpeg';
-      const cl  = resp.headers.get('content-length');
+      const resp = await fetchBypassResolved(coverUrl, { headers: { 'User-Agent': UA, 'Referer': 'https://music.163.com/' } });
+      const ct  = resp.headers['content-type'] || 'image/jpeg';
+      const cl  = resp.headers['content-length'];
       const hdr = {
         'Content-Type': ct,
         'Access-Control-Allow-Origin': '*',
@@ -4171,10 +4223,9 @@ const server = http.createServer(async (req, res) => {
         'Cache-Control': 'public, max-age=86400',
       };
       if (cl) hdr['Content-Length'] = cl;
-      res.writeHead(resp.status, hdr);
-      const reader = resp.body.getReader();
-      while (true) { const c = await reader.read(); if (c.done) break; res.write(c.value); }
-      res.end();
+      res.writeHead(resp.statusCode, hdr);
+      resp.on('data', (chunk) => res.write(chunk));
+      resp.on('end', () => res.end());
     } catch (err) { console.error('[Cover]', err); res.writeHead(500); res.end(); }
     return;
   }
@@ -4186,18 +4237,16 @@ const server = http.createServer(async (req, res) => {
       if (!audioUrl) { res.writeHead(400); res.end('Missing url'); return; }
       const range = req.headers.range || '';
       const hdr = audioProxyHeadersFor(audioUrl, range);
-      const up = await fetch(audioUrl, { headers: hdr });
+      const up = await fetchBypassResolved(audioUrl, { headers: hdr });
       const out = {
-        'Content-Type': audioContentTypeForUrl(audioUrl, up.headers.get('content-type')),
+        'Content-Type': audioContentTypeForUrl(audioUrl, up.headers['content-type']),
         'Access-Control-Allow-Origin': '*',
         'Accept-Ranges': 'bytes',
       };
-      const cl = up.headers.get('content-length'); if (cl) out['Content-Length'] = cl;
-      const cr = up.headers.get('content-range');  if (cr) out['Content-Range']  = cr;
-      res.writeHead(up.status, out);
-      const reader = up.body.getReader();
-      while (true) { const c = await reader.read(); if (c.done) break; res.write(c.value); }
-      res.end();
+      const cl = up.headers['content-length']; if (cl) out['Content-Length'] = cl;
+      const cr = up.headers['content-range'];  if (cr) out['Content-Range']  = cr;
+      res.writeHead(up.statusCode, out);
+      up.pipe(res);
     } catch (err) { console.error('[Audio]', err); res.writeHead(500); res.end(); }
     return;
   }
