@@ -1370,11 +1370,11 @@ async function createWindow() {
   process.env.COOKIE_FILE = path.join(app.getPath('userData'), '.cookie');
   process.env.QQ_COOKIE_FILE = path.join(app.getPath('userData'), '.qq-cookie');
   process.env.MINERADIO_UPDATE_DIR = getUpdateDownloadDir();
-  // 绕过代理直连网易云 CDN，避免代理超时导致封面/音频加载失败
-  const noProxyExtra = 'music.126.net,*.music.126.net,music.163.com,*.music.163.com';
-  const currentNoProxy = process.env.NO_PROXY || process.env.no_proxy || '';
-  process.env.NO_PROXY = currentNoProxy ? `${currentNoProxy},${noProxyExtra}` : noProxyExtra;
-  process.env.no_proxy = process.env.NO_PROXY;
+  // 清除代理，避免直连网易云 CDN 超时
+  delete process.env.HTTP_PROXY;
+  delete process.env.HTTPS_PROXY;
+  delete process.env.http_proxy;
+  delete process.env.https_proxy;
   try {
     const legacyQQCookie = path.join(__dirname, '..', '.qq-cookie');
     if (fs.existsSync(legacyQQCookie)) {
